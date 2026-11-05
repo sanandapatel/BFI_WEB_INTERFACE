@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BFI Controller Test Panel | SGBC, IIT Madras</title>
+<link rel="icon" href="logo.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['"IBM Plex Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        },
+        colors: {
+          ink:   { 900: '#0e1a2b', 800: '#16263c', 700: '#223652', 600: '#3a4f6b', 500: '#5b6f89', 300: '#aab6c6', 200: '#d3dae4', 100: '#e8ecf2', 50: '#f4f6f9' },
+          brand: { 700: '#0f5c63', 600: '#13717a', 500: '#1b8a94', 100: '#d9f0f1', 50: '#eef9f9' },
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  /* range slider */
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; border-radius: 9999px; background: #d3dae4; outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 9999px; background: #fff; border: 3px solid var(--thumb, #13717a); cursor: pointer; box-shadow: 0 1px 3px rgba(14,26,43,.3); }
+  input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 9999px; background: #fff; border: 3px solid var(--thumb, #13717a); cursor: pointer; }
+  input[type=range]:disabled { opacity: .45; cursor: not-allowed; }
+  input[type=range]:disabled::-webkit-slider-thumb { cursor: not-allowed; }
+  input[type=range]:focus-visible { outline: 2px solid #1b8a94; outline-offset: 4px; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #1b8a94; outline-offset: 2px; }
+  button:disabled { cursor: not-allowed; }
+
+  /* log */
+  #logBox { scrollbar-width: thin; scrollbar-color: #3a4f6b #0e1a2b; }
+  .log-line { white-space: pre-wrap; word-break: break-all; }
+
+  /* LED glow */
+  .led-dot { width: 14px; height: 14px; border-radius: 9999px; background: #cbd3de; transition: all .2s; }
+  .led-white.on { background: #fff; box-shadow: 0 0 0 3px #fde68a, 0 0 18px 6px rgba(253,230,138,.9); }
+  .led-uv.on { background: #a78bfa; box-shadow: 0 0 0 3px #ddd6fe, 0 0 18px 6px rgba(139,92,246,.7); }
+  .led-port.on { background: #16a34a; box-shadow: 0 0 0 3px #bbf7d0; }
+
+  @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .toast { animation: toast-in .18s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } * { transition: none !important; } }
+</style>
+</head>
+
+<body class="bg-ink-50 font-sans text-ink-900 antialiased">
+
+<!-- ============================================================ HEADER -->
+<header class="sticky top-0 z-30 border-b border-ink-200 bg-white/95 backdrop-blur">
+  <div class="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3 sm:px-6">
+
+    <div class="flex items-center gap-3">
+      <img id="logoImg" src="logo.png" alt="SGBC IIT Madras" class="h-12 w-auto sm:h-14"
+           onerror="this.classList.add('hidden'); document.getElementById('logoFallback').classList.remove('hidden');">
+      <!-- shown only if logo.png is missing -->
+      <div id="logoFallback" class="hidden flex items-center gap-3">
+        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold tracking-wide text-white">SGBC</div>
+        <div class="leading-tight">
+          <div class="text-sm font-semibold">Sudha Gopalakrishnan Brain Centre</div>
+          <div class="text-xs text-ink-500">IIT Madras</div>
+        </div>
+      </div>
+      <div class="hidden h-10 w-px bg-ink-200 sm:block"></div>
+      <div class="leading-tight">
+        <h1 class="text-lg font-semibold sm:text-xl">BFI Controller Test Panel</h1>
+        <p class="text-xs text-ink-500">Send commands to the LED controller board and check what it replies</p>
+      </div>
+    </div>
+
+    <div class="ml-auto flex flex-wrap items-center gap-3">
+      <label class="flex items-center gap-2 text-sm text-ink-600" title="How long to wait for the board to answer a command">
+        Reply timeout
+        <input id="timeoutSlider" type="range" min="0.5" max="5" step="0.5" value="2" class="w-28">
+        <span id="timeoutVal" class="w-9 font-mono text-sm">2.0 s</span>
+      </label>
+      <button id="connectBtn" class="rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">
+        Connect to board
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-[1500px] px-4 py-6 sm:px-6">
+
+  <!-- browser support warning -->
+  <div id="unsupported" class="mb-5 hidden rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+    <p class="font-semibold">This browser can't talk to serial ports.</p>
+    <p class="mt-1">Open this page in Google Chrome, Microsoft Edge or Opera on a computer. The page must be served over HTTPS (GitHub Pages is fine) or from <code class="font-mono">localhost</code>. Firefox and Safari do not support Web Serial.</p>
+  </div>
+
+  <!-- ====================================================== STATUS ROW -->
+  <section aria-label="Board status" class="grid grid-cols-2 gap-3 md:grid-cols-5">
+    <div class="rounded-xl border border-ink-200 bg-white p-4">
+      <div class="text-xs text-ink-500">Port</div>
+      <div class="mt-1.5 flex items-center gap-2.5"><span id="dotPort" class="led-dot led-port"></span><span id="mPort" class="text-lg font-semibold">Disconnected</span></div>
+    </div>
+    <div class="rounded-xl border border-ink-200 bg-white p-4">
+      <div class="text-xs text-ink-500">White LED</div>
+      <div class="mt-1.5 flex items-center gap-2.5"><span id="dotWhite" class="led-dot led-white"></span><span id="mWhite" class="text-lg font-semibold">OFF</span></div>
+    </div>
+    <div class="rounded-xl border border-ink-200 bg-white p-4">
+      <div class="text-xs text-ink-500">UV LED</div>
+      <div class="mt-1.5 flex items-center gap-2.5"><span id="dotUv" class="led-dot led-uv"></span><span id="mUv" class="text-lg font-semibold">OFF</span></div>
+    </div>
+    <div class="rounded-xl border border-ink-200 bg-white p-4">
+      <div class="text-xs text-ink-500">White current</div>
+      <div id="mWhiteMa" class="mt-1.5 font-mono text-lg font-medium">-</div>
+    </div>
+    <div class="rounded-xl border border-ink-200 bg-white p-4">
+      <div class="text-xs text-ink-500">UV current</div>
+      <div id="mUvMa" class="mt-1.5 font-mono text-lg font-medium">-</div>
+    </div>
+  </section>
+
+  <div id="readyBanner" class="mt-4 hidden rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-sm text-sky-900">
+    No <code class="font-mono">READY</code> line seen since connecting. If the board was already running, press <b>PING</b> to check; otherwise press the physical button on the board.
+  </div>
+  <div id="notConnectedHint" class="mt-4 rounded-xl border border-ink-200 bg-white p-3.5 text-sm text-ink-600">
+    Click <b>Connect to board</b>, choose the board's serial port in the browser pop-up (115200 baud, 8N1, commands end with LF, same as LabVIEW). The board ignores commands until its first button press (<code class="font-mono">READY</code>).
+  </div>
+
+  <div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+
+    <!-- ==================================================== LEFT: CONTROLS -->
+    <div class="space-y-6">
+
+      <!-- LED control -->
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="border-b border-ink-100 px-5 py-3.5"><h2 class="text-base font-semibold">LED control</h2></div>
+        <div id="ledRows" class="divide-y divide-ink-100"></div>
+      </section>
+
+      <!-- PWM -->
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="border-b border-ink-100 px-5 py-3.5">
+          <h2 class="text-base font-semibold">PWM duty</h2>
+          <p class="text-xs text-ink-500">Frequency is fixed at 20 kHz in the firmware. The duty is sent when you release the slider; it applies at once if the LED is on, otherwise it is stored for the next ON.</p>
+        </div>
+        <div class="space-y-6 px-5 py-5">
+          <div>
+            <div class="mb-2 flex items-baseline justify-between">
+              <label for="WHITE_slider" class="text-sm font-medium">White duty <span class="font-normal text-ink-500">(0-255)</span></label>
+              <div class="text-sm"><span id="WHITE_val" class="font-mono text-base font-medium">128</span> <span id="WHITE_pct" class="text-ink-500">(50 %)</span></div>
+            </div>
+            <input id="WHITE_slider" type="range" min="0" max="255" value="128" style="--thumb:#d4a514" class="needs-conn">
+          </div>
+          <div>
+            <div class="mb-2 flex items-baseline justify-between">
+              <label for="UV_slider" class="text-sm font-medium">UV duty <span class="font-normal text-ink-500">(0-255)</span></label>
+              <div class="text-sm"><span id="UV_val" class="font-mono text-base font-medium">128</span> <span id="UV_pct" class="text-ink-500">(50 %)</span></div>
+            </div>
+            <input id="UV_slider" type="range" min="0" max="255" value="128" style="--thumb:#7c3aed" class="needs-conn">
+          </div>
+        </div>
+        <div id="saveRow" class="border-t border-ink-100"></div>
+      </section>
+
+      <!-- Current -->
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="border-b border-ink-100 px-5 py-3.5"><h2 class="text-base font-semibold">Current measurement</h2><p class="text-xs text-ink-500">The LED must be on.</p></div>
+        <div id="currentRows" class="divide-y divide-ink-100"></div>
+      </section>
+
+      <!-- System -->
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="border-b border-ink-100 px-5 py-3.5"><h2 class="text-base font-semibold">System</h2></div>
+        <div id="systemRows" class="divide-y divide-ink-100"></div>
+        <div id="resetNotice" class="hidden border-t border-ink-100 p-4"></div>
+      </section>
+
+      <!-- Self diag -->
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="border-b border-ink-100 px-5 py-3.5"><h2 class="text-base font-semibold">Self-diagnostic</h2></div>
+        <div class="px-5 pt-4">
+          <label class="flex items-start gap-2.5 text-sm" title="Untick to check that the board reports COM_E when no PING arrives">
+            <input id="autoPing" type="checkbox" checked class="mt-0.5 h-4 w-4 rounded border-ink-300 accent-brand-600">
+            <span>Answer the comm test automatically (send PING)<br><span class="text-xs text-ink-500">Untick to check that the board reports <code class="font-mono">COM_E</code> when no PING arrives.</span></span>
+          </label>
+        </div>
+        <div id="diagRow"></div>
+        <div id="diagPanel" class="hidden space-y-3 px-5 pb-5">
+          <div class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">Self-diagnostic running. When the board asks, press the physical button (10 s window).</div>
+          <pre id="diagOut" class="max-h-56 overflow-auto rounded-lg bg-ink-900 p-3 font-mono text-xs leading-relaxed text-ink-100"></pre>
+          <button id="diagStop" class="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-ink-50">Stop waiting</button>
+        </div>
+        <div id="diagResult" class="hidden px-5 pb-5"></div>
+      </section>
+
+      <!-- Raw -->
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="border-b border-ink-100 px-5 py-3.5"><h2 class="text-base font-semibold">Raw command</h2></div>
+        <form id="rawForm" class="flex flex-wrap gap-3 px-5 py-4">
+          <input id="rawCmd" type="text" autocomplete="off" spellcheck="false" placeholder="Type any command, e.g. WHITE_DUTY,200"
+                 class="min-w-0 flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2.5 font-mono text-sm placeholder:font-sans placeholder:text-ink-300">
+          <button id="rawSend" type="submit" class="needs-conn rounded-lg bg-ink-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:bg-ink-200 disabled:text-ink-500">Send raw command</button>
+        </form>
+      </section>
+
+      <!-- Firmware evaluation -->
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="border-b border-ink-100 px-5 py-3.5"><h2 class="text-base font-semibold">Firmware evaluation</h2></div>
+        <div class="space-y-5 px-5 py-5">
+          <div>
+            <button id="runTests" class="needs-conn w-full rounded-lg bg-brand-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:bg-ink-200 disabled:text-ink-500 sm:w-auto">Run automatic test sequence</button>
+            <div id="testProgress" class="mt-3 hidden">
+              <div class="h-2 overflow-hidden rounded-full bg-ink-100"><div id="testBar" class="h-full w-0 rounded-full bg-brand-500 transition-all"></div></div>
+              <div id="testBarText" class="mt-1.5 font-mono text-xs text-ink-500"></div>
+            </div>
+            <div id="testSummary" class="mt-4 hidden"></div>
+            <div id="testTableWrap" class="mt-3 hidden overflow-x-auto rounded-lg border border-ink-200">
+              <table class="w-full min-w-[640px] text-left text-sm">
+                <thead class="bg-ink-50 text-xs text-ink-500">
+                  <tr><th class="px-3 py-2 font-medium">Test</th><th class="px-3 py-2 font-medium">Sent</th><th class="px-3 py-2 font-medium">Expected</th><th class="px-3 py-2 font-medium">Got</th><th class="px-3 py-2 font-medium">ms</th><th class="px-3 py-2 font-medium">Result</th></tr>
+                </thead>
+                <tbody id="testBody" class="divide-y divide-ink-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="border-t border-ink-100 pt-5">
+            <h3 class="text-sm font-semibold">Slider stress test</h3>
+            <p class="mb-3 text-xs text-ink-500">Sweeps the duty 0 to 255 and back to 0 to see whether the board keeps up like a LabVIEW slider would.</p>
+            <div class="flex flex-wrap items-end gap-5">
+              <fieldset>
+                <legend class="mb-1.5 text-xs text-ink-500">Channel</legend>
+                <div class="inline-flex rounded-lg border border-ink-200 p-0.5 text-sm">
+                  <label class="cursor-pointer"><input type="radio" name="sweepCh" value="WHITE" checked class="peer sr-only"><span class="block rounded-md px-3.5 py-1.5 peer-checked:bg-ink-800 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500">White</span></label>
+                  <label class="cursor-pointer"><input type="radio" name="sweepCh" value="UV" class="peer sr-only"><span class="block rounded-md px-3.5 py-1.5 peer-checked:bg-ink-800 peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500">UV</span></label>
+                </div>
+              </fieldset>
+              <label class="text-xs text-ink-500">Gap between commands (ms)
+                <input id="sweepGap" type="number" min="5" max="500" step="1" value="20" class="mt-1.5 block w-32 rounded-lg border border-ink-200 px-3 py-2 font-mono text-sm text-ink-900">
+              </label>
+              <button id="runSweep" class="needs-conn rounded-lg bg-ink-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ink-700 disabled:bg-ink-200 disabled:text-ink-500">Start sweep</button>
+            </div>
+            <div id="sweepProgress" class="mt-3 hidden">
+              <div class="h-2 overflow-hidden rounded-full bg-ink-100"><div id="sweepBar" class="h-full w-0 rounded-full bg-brand-500 transition-all"></div></div>
+            </div>
+            <div id="sweepResult" class="mt-3 hidden"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ======================================================== RIGHT: LOG -->
+    <aside class="xl:sticky xl:top-[92px] xl:self-start">
+      <section class="rounded-2xl border border-ink-200 bg-white">
+        <div class="flex items-center justify-between border-b border-ink-100 px-5 py-3.5">
+          <h2 class="text-base font-semibold">Serial log</h2>
+          <div class="flex gap-2">
+            <button id="clearLog" class="rounded-lg border border-ink-200 px-3 py-1.5 text-sm font-medium hover:bg-ink-50">Clear log</button>
+            <button id="downloadLog" class="rounded-lg border border-ink-200 px-3 py-1.5 text-sm font-medium hover:bg-ink-50">Download log</button>
+          </div>
+        </div>
+        <div class="p-4">
+          <div id="logBox" class="h-[360px] overflow-y-auto rounded-xl bg-ink-900 p-3 font-mono text-[12.5px] leading-6 text-ink-200 xl:h-[calc(100vh-290px)] xl:min-h-[360px]"></div>
+          <p class="mt-3 text-xs text-ink-500">
+            <span class="font-mono text-amber-500">TX</span> sent to the board,
+            <span class="font-mono text-emerald-500">RX</span> received,
+            <span class="font-mono text-sky-400">UI</span> panel messages. Newest line on top.
+          </p>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="mt-10 border-t border-ink-200 pt-5 text-center text-xs text-ink-500">
+    Sudha Gopalakrishnan Brain Centre, IIT Madras &middot; BFI Controller Test Panel
+  </footer>
+</main>
+
+<!-- toasts -->
+<div id="toasts" class="pointer-events-none fixed bottom-5 right-5 z-50 flex flex-col items-end gap-2"></div>
+
+<script>
+/* =====================================================================
+   BFI Controller test panel - browser version (Web Serial API)
+   Same commands and logic as the Streamlit panel:
+   115200 baud, 8N1, every command ends with LF.
+   ===================================================================== */
+'use strict';
+
+const BAUD = 115200;
+const LOG_MAX = 500;
+
+/* ---------------------------------------------------------------- state */
+const S = {
+  port: null,
+  reader: null,
+  connected: false,
+  log: [],
+  inbox: [],          // lines received but not yet consumed (like the serial input buffer)
+  waiter: null,       // resolver of the pending waitLine()
+  readySeen: false,
+  whiteOn: false,
+  uvOn: false,
+  whiteMa: null,
+  uvMa: null,
+  timeout: 2.0,
+  longBusy: false,    // true while tests / sweep / self-diag run
+  abortDiag: false,
+};
+
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const enc = new TextEncoder();
+
+/* ---------------------------------------------------------------- log */
+function stamp() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
+let logQueued = false;
+function log(kind, text) {
+  S.log.push({ t: stamp(), kind, text });
+  if (S.log.length > LOG_MAX) S.log.splice(0, S.log.length - LOG_MAX);
+  if (!logQueued) {
+    logQueued = true;
+    requestAnimationFrame(() => { logQueued = false; renderLog(); });
+  }
+}
+
+const KIND_COLOR = { TX: 'text-amber-400', RX: 'text-emerald-400', UI: 'text-sky-400' };
+function esc(s) { return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function renderLog() {
+  const box = $('logBox');
+  if (!S.log.length) {
+    box.innerHTML = '<span class="text-ink-500">(no traffic yet)</span>';
+    return;
+  }
+  const rows = S.log.slice(-200).reverse().map((e) =>
+    `<div class="log-line"><span class="text-ink-500">${e.t}</span>  <span class="${KIND_COLOR[e.kind] || ''} font-medium">${e.kind.padEnd(2)}</span>  <span class="${e.kind === 'RX' && /^ERR/.test(e.text) ? 'text-red-400' : ''}">${esc(e.text)}</span></div>`
+  );
+  box.innerHTML = rows.join('');
+}
+
+function logAsText() {
+  return S.log.map((e) => `${e.t}  ${e.kind.padEnd(2)}  ${e.text}`).join('\n');
+}
+
+/* ---------------------------------------------------------------- toasts */
+function toast(msg, ok = true) {
+  const el = document.createElement('div');
+  el.className = `toast pointer-events-auto rounded-lg px-4 py-2.5 text-sm font-medium text-white shadow-lg ${ok ? 'bg-ink-800' : 'bg-red-600'}`;
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+/* ---------------------------------------------------------------- UI refresh */
+function render() {
+  const c = S.connected;
+  $('mPort').textContent = c ? 'Connected' : 'Disconnected';
+  $('dotPort').classList.toggle('on', c);
+  $('mWhite').textContent = S.whiteOn ? 'ON' : 'OFF';
+  $('dotWhite').classList.toggle('on', S.whiteOn);
+  $('mUv').textContent = S.uvOn ? 'ON' : 'OFF';
+  $('dotUv').classList.toggle('on', S.uvOn);
+  $('mWhiteMa').textContent = S.whiteMa ? `${S.whiteMa} mA` : '-';
+  $('mUvMa').textContent = S.uvMa ? `${S.uvMa} mA` : '-';
+
+  $('readyBanner').classList.toggle('hidden', !(c && !S.readySeen));
+  $('notConnectedHint').classList.toggle('hidden', c);
+
+  const btn = $('connectBtn');
+  btn.textContent = c ? 'Disconnect' : 'Connect to board';
+  btn.className = 'rounded-lg px-5 py-2.5 text-sm font-semibold shadow-sm transition ' +
+    (c ? 'border border-ink-200 bg-white text-ink-800 hover:bg-ink-50' : 'bg-brand-600 text-white hover:bg-brand-700');
+
+  document.querySelectorAll('.needs-conn').forEach((el) => {
+    el.disabled = !c || (S.longBusy && !el.dataset.allowBusy);
+  });
+  $('rawSend').disabled = !c || S.longBusy || !$('rawCmd').value.trim();
+}
+
+/* ---------------------------------------------------------------- tracking */
+function track(line) {
+  if (line === 'READY') S.readySeen = true;
+  else if (line === 'ACK:WHITE_ON') S.whiteOn = true;
+  else if (line === 'ACK:WHITE_OFF') S.whiteOn = false;
+  else if (line === 'ACK:UV_ON') S.uvOn = true;
+  else if (line === 'ACK:UV_OFF') S.uvOn = false;
+  else if (line.startsWith('CURRENT_WHITE,')) S.whiteMa = line.split(',').slice(1).join(',');
+  else if (line.startsWith('CURRENT_UV,')) S.uvMa = line.split(',').slice(1).join(',');
+  else return;
+  render();
+}
+
+/* ---------------------------------------------------------------- serial I/O */
+function onLine(line) {
+  log('RX', line);
+  track(line);
+  if (S.waiter) S.waiter(line);
+  else {
+    S.inbox.push(line);
+    if (S.inbox.length > 500) S.inbox.shift();
+  }
+}
+
+async function readLoop(port) {
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  try {
+    while (port.readable && S.connected && S.port === port) {
+      S.reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await S.reader.read();
+          if (done) break;
+          if (!value) continue;
+          buf += decoder.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i).trim();
+            buf = buf.slice(i + 1);
+            if (line) onLine(line);
+          }
+          if (buf.length > 4096) buf = '';
+        }
+      } finally {
+        try { S.reader.releaseLock(); } catch (_) {}
+        S.reader = null;
+      }
+    }
+  } catch (err) {
+    if (S.connected && S.port === port) log('UI', `serial error: ${err.message}`);
+  }
+  if (S.connected && S.port === port) await disconnect(true);
+}
+
+function waitLine(deadline) {
+  return new Promise((resolve) => {
+    if (S.inbox.length) return resolve(S.inbox.shift());
+    const ms = deadline - performance.now();
+    if (ms <= 0 || !S.connected) return resolve(null);
+    const timer = setTimeout(() => { S.waiter = null; resolve(null); }, ms);
+    S.waiter = (line) => { clearTimeout(timer); S.waiter = null; resolve(line); };
+  });
+}
+
+function drain() {
+  const out = S.inbox.slice();
+  S.inbox.length = 0;
+  return out;
+}
+
+async function writeLine(text) {
+  const writer = S.port.writable.getWriter();
+  try { await writer.write(enc.encode(text + '\n')); }
+  finally { writer.releaseLock(); }
+}
+
+async function connect() {
+  if (!('serial' in navigator)) { $('unsupported').classList.remove('hidden'); return; }
+  let port;
+  try {
+    port = await navigator.serial.requestPort();
+  } catch (err) {
+    return; // user closed the picker
+  }
+  try {
+    await port.open({ baudRate: BAUD, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
+  } catch (err) {
+    toast(`Could not open the port: ${err.message}`, false);
+    log('UI', `could not open port: ${err.message}`);
+    return;
+  }
+  S.port = port;
+  S.connected = true;
+  S.readySeen = false;
+  S.inbox.length = 0;
+  const info = port.getInfo ? port.getInfo() : {};
+  const idTxt = info.usbVendorId ? ` (USB ${info.usbVendorId.toString(16).padStart(4, '0')}:${(info.usbProductId || 0).toString(16).padStart(4, '0')})` : '';
+  log('UI', `connected at ${BAUD} baud${idTxt}`);
+  render();
+  readLoop(port);
+  await sleep(300);
+}
+
+async function disconnect(failed = false) {
+  const port = S.port;
+  S.connected = false;
+  S.port = null;
+  S.abortDiag = true;
+  if (S.waiter) S.waiter(null);
+  try { if (S.reader) await S.reader.cancel(); } catch (_) {}
+  try { if (port) await port.close(); } catch (_) {}
+  S.whiteOn = false;
+  S.uvOn = false;
+  log('UI', failed ? 'connection lost' : 'disconnected');
+  if (failed) toast('Connection lost. Connect again.', false);
+  render();
+}
+
+if ('serial' in navigator) {
+  navigator.serial.addEventListener('disconnect', (e) => {
+    if (S.port && e.target === S.port) disconnect(true);
+  });
+}
+
+/* ---------------------------------------------------------------- operation queue
+   Short commands run one after another so replies never get mixed up. */
+let chain = Promise.resolve();
+function enqueue(fn) {
+  const run = chain.then(() => fn());
+  chain = run.catch(() => {});
+  return run;
+}
+
+/* ---------------------------------------------------------------- send()
+   expect: "ack"  -> pass when a normal reply arrives
+           "err"  -> pass when an ERR reply arrives
+           "none" -> pass when the board stays silent (ignored command) */
+async function send(cmd, stops = ['ACK:', 'ERR'], timeout = 2.0, expect = 'ack') {
+  const result = { cmd, status: 'NO REPLY', passed: false, reply: '', ms: 0 };
+  if (!S.connected) { result.status = 'NOT CONNECTED'; return result; }
+
+  drain();
+  log('TX', cmd);
+  try {
+    await writeLine(cmd);
+  } catch (err) {
+    log('UI', `write failed: ${err.message}`);
+    await disconnect(true);
+    result.status = 'WRITE FAILED';
+    return result;
+  }
+
+  const t0 = performance.now();
+  const deadline = t0 + timeout * 1000;
+  const lines = [];
+  while (performance.now() < deadline && S.connected) {
+    const line = await waitLine(deadline);
+    if (!line) break;
+    lines.push(line);
+    if (stops.some((s) => line.startsWith(s))) break;
+  }
+
+  const gotStop = lines.length > 0 && stops.some((s) => lines[lines.length - 1].startsWith(s));
+  if (gotStop) result.status = lines[lines.length - 1].startsWith('ERR') ? 'ERR' : 'OK';
+  result.reply = lines.join(' | ');
+  result.ms = Math.round(performance.now() - t0);
+
+  if (expect === 'ack') result.passed = result.status === 'OK';
+  else if (expect === 'err') result.passed = result.status === 'ERR';
+  else result.passed = lines.length === 0;
+  return result;
+}
+
+/* send from a button and show a toast */
+async function doCmd(cmd, stops = ['ACK:', 'ERR'], label = cmd) {
+  const r = await enqueue(() => send(cmd, stops, S.timeout));
+  toast(r.passed ? `${cmd}: OK (${r.ms} ms)` : `${cmd}: ${r.status}`, r.passed);
+  setChip(label, r);
+  return r;
+}
+
+/* ---------------------------------------------------------------- command rows */
+const fmt = (s) => s.split('`').map((p, i) => i % 2 ? `<code class="rounded bg-ink-100 px-1 py-0.5 font-mono text-[12px] text-ink-700">${esc(p)}</code>` : esc(p)).join('');
+
+const LED_ROWS = [
+  { label: 'WHITE_ON',  cmd: 'WHITE_ON',  desc: 'White LED on, stays on until WHITE_OFF', exp: '`WHITE_ON`, `ACK:WHITE_ON`' },
+  { label: 'WHITE_OFF', cmd: 'WHITE_OFF', desc: 'White LED off',                          exp: '`WHITE_OFF`, `ACK:WHITE_OFF`' },
+  { label: 'UV_ON',     cmd: 'UV_ON',     desc: 'UV LED on, stays on until UV_OFF',       exp: '`UV_ON`, `ACK:UV_ON`' },
+  { label: 'UV_OFF',    cmd: 'UV_OFF',    desc: 'UV LED off',                             exp: '`UV_OFF`, `ACK:UV_OFF`' },
+];
+const SAVE_ROW = [
+  { label: 'Config save (OK)', cmd: 'OK', desc: 'Save both duty values to the board', exp: '`SAVED`, `ACK:OK`', stops: ['ACK:OK', 'ERR'] },
+];
+const CURRENT_ROWS = [
+  { label: 'CURRENT_WHITE', cmd: 'CURRENT_WHITE', desc: 'Average white LED current in mA', exp: '`CURRENT_WHITE,<mA>`, `ACK:CURRENT_WHITE` (or `ERR: WHITE_OFF`)' },
+  { label: 'CURRENT_UV',    cmd: 'CURRENT_UV',    desc: 'Average UV LED current in mA',    exp: '`CURRENT_UV,<mA>`, `ACK:CURRENT_UV` (or `ERR: UV_OFF`)' },
+];
+const SYSTEM_ROWS = [
+  { label: 'PING',  cmd: 'PING', desc: 'Communication check', exp: '`PONG`', stops: ['PONG'] },
+  { label: 'RESET', cmd: 'RESET', desc: 'Reboot the board (LEDs off first); the port re-appears', exp: '`SOFT_RESET`, `ACK:RESET`', handler: () => runReset() },
+];
+const DIAG_ROW = [
+  { label: 'SELF_DIAG', cmd: 'SELF_DIAG', desc: 'UV, white, buzzer, button and comm tests; both LEDs must be off',
+    exp: '`UV_OK`/`UV_E` ... `COM_OK`/`COM_E`, `DIAG_PASS` or `DIAG_FAIL` + `ERR:` lines, `READY`', handler: () => runSelfDiag() },
+];
+
+function buildRows(container, rows) {
+  rows.forEach((r) => {
+    const el = document.createElement('div');
+    el.className = 'grid items-center gap-x-4 gap-y-2 px-5 py-3.5 sm:grid-cols-[10.5rem_1fr]';
+    el.innerHTML = `
+      <button class="needs-conn rounded-lg bg-ink-800 px-3 py-2.5 text-left font-mono text-[13px] font-medium text-white transition hover:bg-ink-700 disabled:bg-ink-100 disabled:text-ink-300">${esc(r.label)}</button>
+      <div class="min-w-0">
+        <div class="text-sm">${esc(r.desc)}</div>
+        <div class="mt-1 text-xs text-ink-500">Board replies: ${fmt(r.exp)}</div>
+        <div class="mt-1.5 hidden text-xs" data-chip="${esc(r.label)}"></div>
+      </div>`;
+    el.querySelector('button').addEventListener('click', () => {
+      if (r.handler) r.handler();
+      else doCmd(r.cmd, r.stops || ['ACK:', 'ERR'], r.label);
+    });
+    container.appendChild(el);
+  });
+}
+
+function setChip(label, r) {
+  const el = document.querySelector(`[data-chip="${CSS.escape(label)}"]`);
+  if (!el) return;
+  el.classList.remove('hidden');
+  const cls = r.passed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700';
+  el.innerHTML = `<span class="inline-block max-w-full break-all rounded-md px-2 py-1 font-mono ${cls}">${r.passed ? 'OK' : esc(r.status)} &middot; ${r.ms} ms${r.reply ? ' &middot; ' + esc(r.reply) : ''}</span>`;
+}
+
+buildRows($('ledRows'), LED_ROWS);
+buildRows($('saveRow'), SAVE_ROW);
+buildRows($('currentRows'), CURRENT_ROWS);
+buildRows($('systemRows'), SYSTEM_ROWS);
+buildRows($('diagRow'), DIAG_ROW);
+
+/* ---------------------------------------------------------------- reset */
+function notice(el, type, html) {
+  const map = {
+    ok:   'border-emerald-200 bg-emerald-50 text-emerald-800',
+    warn: 'border-amber-200 bg-amber-50 text-amber-900',
+    err:  'border-red-200 bg-red-50 text-red-800',
+    info: 'border-sky-200 bg-sky-50 text-sky-900',
+  };
+  el.classList.remove('hidden');
+  el.innerHTML = `<div class="rounded-lg border p-3 text-sm ${map[type]}">${html}</div>`;
+}
+
+async function runReset() {
+  const r = await enqueue(() => send('RESET', ['ACK:RESET', 'ERR'], S.timeout));
+  setChip('RESET', r);
+  if (r.passed) {
+    await sleep(300);
+    await disconnect();
+    notice($('resetNotice'), 'warn', 'Board is rebooting and the USB port re-appears. Press <b>Connect to board</b> again, pick the port, then press the button on the board.');
+  } else {
+    toast(`RESET: ${r.status}`, false);
+  }
+}
+
+/* ---------------------------------------------------------------- self diag */
+async function runSelfDiag() {
+  await enqueue(async () => {
+    if (!S.connected) return;
+    S.longBusy = true; S.abortDiag = false; render();
+    $('diagResult').classList.add('hidden');
+    $('diagPanel').classList.remove('hidden');
+    const out = $('diagOut');
+    out.textContent = '';
+
+    drain();
+    try { await writeLine('SELF_DIAG'); } catch (err) { await disconnect(true); S.longBusy = false; render(); return; }
+    log('TX', 'SELF_DIAG');
+
+    const auto = $('autoPing').checked;
+    const lines = [];
+    let pinged = false;
+    const deadline = performance.now() + 90000;
+
+    while (performance.now() < deadline && S.connected && !S.abortDiag) {
+      const line = await waitLine(Math.min(deadline, performance.now() + 500));
+      if (!line) continue;
+      lines.push(line);
+      out.textContent = lines.join('\n');
+      out.scrollTop = out.scrollHeight;
+      // answer the comm test: PING once, as soon as the button test is over
+      if (auto && !pinged && ['COMM_TEST', 'BTN_OK', 'BTN_E'].includes(line)) {
+        try { await writeLine('PING'); log('TX', 'PING (auto)'); } catch (_) {}
+        pinged = true;
+      }
+      if (line === 'READY' || line.startsWith('ERR: LED_ON')) break;
+    }
+
+    $('diagPanel').classList.add('hidden');
+    const res = $('diagResult');
+    if (lines.includes('DIAG_PASS')) {
+      notice(res, 'ok', '<b>DIAG_PASS</b> - all tests passed');
+    } else if (lines.includes('DIAG_FAIL')) {
+      const errors = lines.filter((x) => x.startsWith('ERR:'));
+      notice(res, 'err', '<b>DIAG_FAIL</b>' + (errors.length ? ' - ' + esc(errors.join(', ')) : ''));
+    } else {
+      notice(res, 'warn', 'No DIAG_PASS or DIAG_FAIL received (timeout, stopped, or the board refused: LED on?)');
+    }
+    // keep the transcript visible under the result
+    res.innerHTML += `<pre class="mt-3 max-h-48 overflow-auto rounded-lg bg-ink-900 p-3 font-mono text-xs leading-relaxed text-ink-100">${esc(lines.join('\n') || '(no lines received)')}</pre>`;
+    S.longBusy = false; render();
+  });
+}
+$('diagStop').addEventListener('click', () => { S.abortDiag = true; });
+
+/* ---------------------------------------------------------------- duty sliders */
+['WHITE', 'UV'].forEach((ch) => {
+  const slider = $(`${ch}_slider`);
+  const updateLabel = () => {
+    const v = Number(slider.value);
+    $(`${ch}_val`).textContent = v;
+    $(`${ch}_pct`).textContent = `(${Math.round((v / 255) * 100)} %)`;
+  };
+  slider.addEventListener('input', updateLabel);
+  // 'change' fires when the slider is released: send the duty then
+  slider.addEventListener('change', async () => {
+    updateLabel();
+    if (!S.connected) return;
+    const value = slider.value;
+    const r = await enqueue(() => send(`${ch}_DUTY,${value}`, ['ACK:', 'ERR'], 1.0));
+    toast(`${ch}_DUTY,${value}: ${r.passed ? 'OK' : r.status}`, r.passed);
+  });
+  updateLabel();
+});
+
+/* ---------------------------------------------------------------- raw command */
+$('rawCmd').addEventListener('input', render);
+$('rawForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const cmd = $('rawCmd').value.trim();
+  if (!cmd || !S.connected) return;
+  doCmd(cmd);
+});
+
+/* ---------------------------------------------------------------- automatic tests */
+// [command, stops, expectation, what it checks]
+const TESTS = [
+  ['PING',            ['PONG'],         'ack',  'PING returns PONG'],
+  ['WHITE_DUTY,128',  ['ACK:', 'ERR'],  'ack',  'Set white duty'],
+  ['WHITE_ON',        ['ACK:', 'ERR'],  'ack',  'White on'],
+  ['CURRENT_WHITE',   ['ACK:', 'ERR'],  'ack',  'White current while on'],
+  ['WHITE_DUTY,255',  ['ACK:', 'ERR'],  'ack',  'White duty changes live'],
+  ['WHITE_OFF',       ['ACK:', 'ERR'],  'ack',  'White off'],
+  ['CURRENT_WHITE',   ['ACK:', 'ERR'],  'err',  'White current while off is refused'],
+  ['UV_DUTY,128',     ['ACK:', 'ERR'],  'ack',  'Set UV duty'],
+  ['UV_ON',           ['ACK:', 'ERR'],  'ack',  'UV on'],
+  ['CURRENT_UV',      ['ACK:', 'ERR'],  'ack',  'UV current while on'],
+  ['UV_OFF',          ['ACK:', 'ERR'],  'ack',  'UV off'],
+  ['CURRENT_UV',      ['ACK:', 'ERR'],  'err',  'UV current while off is refused'],
+  ['WHITE_DUTY,999',  ['ACK:', 'ERR'],  'err',  'Duty above 255 is rejected'],
+  ['WHITE_DUTY,abc',  ['ACK:', 'ERR'],  'err',  'Non-numeric duty is rejected'],
+  ['UV_DUTY,-5',      ['ACK:', 'ERR'],  'err',  'Negative duty is rejected'],
+  ['WHITE_FREQ,1000', ['ACK:', 'ERR'],  'none', 'Removed command is ignored'],
+  ['NOT_A_COMMAND',   ['ACK:', 'ERR'],  'none', 'Unknown command is ignored'],
+  ['OK',              ['ACK:OK', 'ERR'],'ack',  'Save duty values'],
+];
+const EXPECT_TEXT = { ack: 'normal reply', err: 'ERR reply', none: 'no reply' };
+
+$('runTests').addEventListener('click', () => {
+  enqueue(async () => {
+    if (!S.connected) return;
+    S.longBusy = true; render();
+    const rows = [];
+    $('testProgress').classList.remove('hidden');
+    $('testSummary').classList.add('hidden');
+    $('testTableWrap').classList.add('hidden');
+
+    for (let i = 0; i < TESTS.length && S.connected; i++) {
+      const [cmd, stops, expect, what] = TESTS[i];
+      const timeout = expect === 'none' ? 0.6 : S.timeout;
+      const r = await send(cmd, stops, timeout, expect);
+      rows.push({ test: what, sent: cmd, expected: EXPECT_TEXT[expect], got: r.reply || '(nothing)', ms: r.ms, pass: r.passed });
+      $('testBar').style.width = `${((i + 1) / TESTS.length) * 100}%`;
+      $('testBarText').textContent = `${i + 1}/${TESTS.length}  ${cmd}`;
+      await sleep(100);
+    }
+
+    $('testProgress').classList.add('hidden');
+    $('testBar').style.width = '0%';
+    showTestResults(rows);
+    S.longBusy = false; render();
+  });
+});
+
+function showTestResults(rows) {
+  if (!rows.length) return;
+  const passed = rows.filter((r) => r.pass).length;
+  const sum = $('testSummary');
+  sum.classList.remove('hidden');
+  notice(sum, passed === rows.length ? 'ok' : 'err', `<b>${passed} of ${rows.length} tests passed</b>`);
+  $('testBody').innerHTML = rows.map((r) => `
+    <tr class="${r.pass ? '' : 'bg-red-50/60'}">
+      <td class="px-3 py-2">${esc(r.test)}</td>
+      <td class="px-3 py-2 font-mono text-xs">${esc(r.sent)}</td>
+      <td class="px-3 py-2 text-ink-600">${esc(r.expected)}</td>
+      <td class="px-3 py-2 font-mono text-xs break-all">${esc(r.got)}</td>
+      <td class="px-3 py-2 font-mono text-xs">${r.ms}</td>
+      <td class="px-3 py-2"><span class="rounded-md px-2 py-0.5 text-xs font-semibold ${r.pass ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">${r.pass ? 'PASS' : 'FAIL'}</span></td>
+    </tr>`).join('');
+  $('testTableWrap').classList.remove('hidden');
+}
+
+/* ---------------------------------------------------------------- sweep stress test */
+$('runSweep').addEventListener('click', () => {
+  const ch = document.querySelector('input[name=sweepCh]:checked').value;
+  const gap = Math.min(500, Math.max(5, Number($('sweepGap').value) || 20));
+  enqueue(async () => {
+    if (!S.connected) return;
+    S.longBusy = true; render();
+    $('sweepProgress').classList.remove('hidden');
+    $('sweepResult').classList.add('hidden');
+
+    const values = [];
+    for (let v = 0; v <= 255; v += 5) values.push(v);
+    for (let v = 255; v >= 0; v -= 5) values.push(v);
+
+    drain();
+    let acks = 0;
+    const countAcks = () => drain().filter((x) => x === `ACK:${ch}_DUTY`).length;
+
+    for (let i = 0; i < values.length && S.connected; i++) {
+      const v = values[i];
+      log('TX', `${ch}_DUTY,${v}`);
+      try { await writeLine(`${ch}_DUTY,${v}`); } catch (_) { await disconnect(true); break; }
+      await sleep(gap);
+      acks += countAcks();
+      $('sweepBar').style.width = `${((i + 1) / values.length) * 100}%`;
+    }
+    if (S.connected) {
+      await sleep(500);
+      acks += countAcks();
+      // restore the slider value
+      await send(`${ch}_DUTY,${$(`${ch}_slider`).value}`, ['ACK:', 'ERR'], 1.0);
+      const lost = values.length - acks;
+      notice($('sweepResult'), lost === 0 ? 'ok' : 'warn',
+        lost === 0 ? `Sent ${values.length} commands, got ${acks} ACKs - no command lost`
+                   : `Sent ${values.length} commands, got ${acks} ACKs - ${lost} lost or late`);
+    }
+    $('sweepProgress').classList.add('hidden');
+    $('sweepBar').style.width = '0%';
+    S.longBusy = false; render();
+  });
+});
+
+/* ---------------------------------------------------------------- header + log buttons */
+$('connectBtn').addEventListener('click', () => (S.connected ? disconnect() : connect()));
+
+$('timeoutSlider').addEventListener('input', (e) => {
+  S.timeout = Number(e.target.value);
+  $('timeoutVal').textContent = `${S.timeout.toFixed(1)} s`;
+});
+
+$('clearLog').addEventListener('click', () => { S.log = []; renderLog(); });
+$('downloadLog').addEventListener('click', () => {
+  const blob = new Blob([logAsText()], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'bfi_log.txt';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+/* ---------------------------------------------------------------- init */
+if (!('serial' in navigator)) $('unsupported').classList.remove('hidden');
+renderLog();
+render();
+</script>
+</body>
+</html>
